@@ -1,0 +1,22 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+ <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+ <!-- 알림 말풍선에 앱 이름·아이콘을 보여 주려고 실행 가능한 앱 목록만 조회 -->
+ <queries>
+  <intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent>
+ </queries>
+ <application android:theme="@android:style/Theme.Material.Light.NoActionBar" android:label="@string/app_name"
+   android:icon="@mipmap/ic_launcher" android:allowBackup="false">
+  <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask">
+   <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+  </activity>
+  <service android:name=".NaiaListener" android:exported="true" android:label="@string/app_name"
+    android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+   <intent-filter><action android:name="android.service.notification.NotificationListenerService"/></intent-filter>
+  </service>
+  <service android:name=".NaiaService" android:exported="true" android:label="@string/app_name"
+    android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+   <intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter>
+   <meta-data android:name="android.accessibilityservice" android:resource="@xml/naia_a11y"/>
+  </service>
+ </application>
+</manifest>
