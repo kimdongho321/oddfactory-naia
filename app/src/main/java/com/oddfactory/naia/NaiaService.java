@@ -295,6 +295,8 @@ public final class NaiaService extends AccessibilityService {
         void sprite(Canvas c, Bitmap b, float left, float top, float w, float h, boolean flip) {
             if (b == null) return;
             src.set(0, 0, b.getWidth(), b.getHeight());
+            // 세로로 긴 프레임(공중 장면 머리 위 여백)은 바닥선을 맞추고 위로 늘린다
+            if (b.getHeight() != b.getWidth()) { float h2 = w * b.getHeight() / b.getWidth(); top -= h2 - h; h = h2; }
             if (flip) { c.save(); c.scale(-1, 1, left + w / 2, 0); }
             dst.set(left, top, left + w, top + h); c.drawBitmap(b, src, dst, pix);
             if (flip) c.restore();
