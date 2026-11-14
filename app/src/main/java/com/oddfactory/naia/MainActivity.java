@@ -19,10 +19,12 @@ public final class MainActivity extends Activity {
     Typeface bold, light; float dp;
     TextView status; Button callBtn;
     SharedPreferences prefs;
+    com.oddfactory.update.UpdateCheck appUpdates;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         dp = getResources().getDisplayMetrics().density;
+        appUpdates = new com.oddfactory.update.UpdateCheck(this, v -> {});
         prefs = getSharedPreferences(NaiaService.PREFS, MODE_PRIVATE);
         try { bold = getResources().getFont(R.font.maple_bold); light = getResources().getFont(R.font.maple_light); } catch (Exception ignored) {}
         LinearLayout l = new LinearLayout(this); l.setOrientation(LinearLayout.VERTICAL);
@@ -49,6 +51,7 @@ public final class MainActivity extends Activity {
         l.addView(button("시험 알림 3개 보내기", 0xFF9DB0B8, v -> postTests()));
         TextView help = text("나이아 조작: 톡 = 간지럼 · 꾹 눌러 끌기 = 볼 당겨 옮기기 · 두 번 톡 = 메뉴(설정·돌려보내기)", 13, false);
         help.setPadding(0, (int) (12 * dp), 0, 0); l.addView(help);
+        l.addView(button("업데이트 확인 (현재 " + BuildConfig.VERSION_NAME + ")", 0xFF7C8CC4, v -> appUpdates.checkNow()));
         TextView ver = text("현재 버전 " + BuildConfig.VERSION_NAME + "\n글꼴: 메이플스토리 서체(넥슨) 사용", 12, false);
         ver.setTextColor(0xFF6A7A82); ver.setPadding(0, (int) (16 * dp), 0, 0); l.addView(ver);
         ScrollView sv = new ScrollView(this); sv.addView(l); setContentView(sv);
@@ -66,6 +69,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        appUpdates.resume();
         // 앱을 열면 나이아가 웅덩이에서 나온다
         if (NaiaService.current != null && !NaiaService.shown()) NaiaService.summon();
         getWindow().getDecorView().postDelayed(this::refresh, 400);
@@ -96,5 +100,9 @@ public final class MainActivity extends Activity {
                     .setContentTitle(t[k]).setContentText("밀어서 지우면 물총, 모두 지우기는 파도").setGroup("t" + k).build());
         }
     }
+    @Override protected void onPause() { appUpdates.pause(); super.onPause(); }
+    @Override protected void onDestroy() { appUpdates.destroy(); super.onDestroy(); }
+    @Override protected void onActivityResult(int request, int result, Intent data) { super.onActivityResult(request, result, data); appUpdates.onActivityResult(request); }
+    @Override public void onWindowFocusChanged(boolean focused) { super.onWindowFocusChanged(focused); if (focused) appUpdates.onWindowFocus(); }
     @Override public void onRequestPermissionsResult(int c, String[] p, int[] r) { if (r.length > 0 && r[0] == PackageManager.PERMISSION_GRANTED) postTests(); }
 }
