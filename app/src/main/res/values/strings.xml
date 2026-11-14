@@ -1,4 +1,4 @@
 <resources>
  <string name="app_name">나이아 알림 청소</string>
- <string name="a11y_desc">나이아를 화면 위에 띄우고, 알림을 지울 때 물총·파도 효과를 그립니다. 화면 내용은 읽지 않습니다.</string>
+ <string name="a11y_desc">나이아를 화면 위에 띄우고, 알림을 지울 때 물총·파도 효과를 그립니다. 지운 알림 카드를 정확히 맞히려고 알림창 화면에서 카드 위치만 확인하며, 화면 내용을 저장하거나 밖으로 보내지 않습니다.</string>
 </resources>

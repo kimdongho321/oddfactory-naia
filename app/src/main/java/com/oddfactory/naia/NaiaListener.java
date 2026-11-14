@@ -61,9 +61,15 @@ public final class NaiaListener extends NotificationListenerService {
         if (reason != REASON_CANCEL && reason != REASON_CANCEL_ALL) return;
         long now = SystemClock.uptimeMillis();
         boolean burst = now - lastUser < 400; lastUser = now;
+        // 지워진 알림을 화면에 다시 그려 맞고 사라지는 연출을 하려고 내용을 넘긴다
+        Notification n = sbn.getNotification();
+        CharSequence title = n.extras.getCharSequence(Notification.EXTRA_TITLE);
+        CharSequence text = n.extras.getCharSequence(Notification.EXTRA_TEXT);
+        NaiaService.Gone g = new NaiaService.Gone(sbn.getPackageName(), n.getSmallIcon(),
+                title == null ? "" : title.toString(), text == null ? "" : text.toString());
         // 삼성 '지우기'는 보이는 알림을 CANCEL로 하나씩, 나머지를 CANCEL_ALL로 보낸다 → 연속 제거면 파도
-        if (reason == REASON_CANCEL_ALL || burst) { NaiaService.onClearAll(); return; }
+        if (reason == REASON_CANCEL_ALL || burst) { NaiaService.onClearAll(g); return; }
         // 하나 지우기는 기다리지 않고 바로 쏜다(곧이어 연속 제거가 오면 서비스에서 파도로 바꾼다)
-        NaiaService.onDismiss(idx);
+        NaiaService.onDismiss(idx, g);
     }
 }

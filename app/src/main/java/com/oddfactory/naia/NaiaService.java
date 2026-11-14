@@ -35,8 +35,13 @@ public final class NaiaService extends AccessibilityService {
     static void onPosted(String pkg, Icon small, Icon large, String title, String text) {
         NaiaService s = current; if (s != null) s.main.post(() -> s.notifyPosted(pkg, small, large, title, text));
     }
-    static void onDismiss(int pos) { NaiaService s = current; if (s != null) s.main.post(() -> s.shoot(pos)); }
-    static void onClearAll() { NaiaService s = current; if (s != null) s.main.post(s::callTide); }
+    /** 지워진 알림 한 장의 내용(화면에 다시 그려 맞고 사라지게 하려고). */
+    static final class Gone {
+        final String pkg, title, text; final Icon small;
+        Gone(String p, Icon s, String a, String b) { pkg = p; small = s; title = a; text = b; }
+    }
+    static void onDismiss(int pos, Gone g) { NaiaService s = current; if (s != null) s.main.post(() -> s.shoot(pos, g)); }
+    static void onClearAll(Gone g) { NaiaService s = current; if (s != null) s.main.post(() -> s.callTide(g)); }
     static void onDnd(boolean on) { NaiaService s = current; if (s != null) s.main.post(() -> s.setDnd(on)); else pendingDnd = on; }
     static volatile boolean pendingDnd;
     static void summon() { NaiaService s = current; if (s != null) s.main.post(s::enter); }
@@ -93,7 +98,57 @@ public final class NaiaService extends AccessibilityService {
         stage.post(() -> { placeDefault(); if (prefs.getBoolean("shown", true)) enter(); });
     }
 
-    @Override public void onAccessibilityEvent(AccessibilityEvent e) {}
+    // ---- 알림창 카드 위치 기억 ----
+    // 알림창(시스템 UI) 화면 구조에서 글자 칸의 위치만 읽어, 알림 제목 → 카드 테두리를 잠깐 기억한다.
+    // 저장·전송하지 않고, 지워진 알림을 맞히는 데만 쓴다. 알림은 지워진 뒤에야 알려 주므로 직전 위치를 보관.
+    static final class Seen { final RectF r; final long at; Seen(RectF a, long b) { r = a; at = b; } }
+    final java.util.HashMap<String, Seen> cardAt = new java.util.HashMap<>();
+    long scanAt; boolean scanQueued;
+    @Override public void onAccessibilityEvent(AccessibilityEvent e) {
+        if (e == null || e.getPackageName() == null || !"com.android.systemui".contentEquals(e.getPackageName())) return;
+        if (scanQueued) return;
+        scanQueued = true;
+        long wait = Math.max(0, 120 - (SystemClock.uptimeMillis() - scanAt));
+        main.postDelayed(() -> { scanQueued = false; scanCards(); }, wait);
+    }
+    void scanCards() {
+        scanAt = SystemClock.uptimeMillis();
+        List<android.view.accessibility.AccessibilityWindowInfo> ws;
+        try { ws = getWindows(); } catch (RuntimeException ex) { return; }
+        float maxH = 150 * dp;
+        for (android.view.accessibility.AccessibilityWindowInfo w : ws) {
+            android.view.accessibility.AccessibilityNodeInfo root;
+            try { root = w.getRoot(); } catch (RuntimeException ex) { continue; }
+            if (root == null || root.getPackageName() == null || !"com.android.systemui".contentEquals(root.getPackageName())) continue;
+            ArrayList<android.view.accessibility.AccessibilityNodeInfo> q = new ArrayList<>(); q.add(root);
+            int seen = 0;
+            while (!q.isEmpty() && seen < 1500) {
+                android.view.accessibility.AccessibilityNodeInfo n = q.remove(q.size() - 1); seen++;
+                CharSequence t = n.getText();
+                if (t != null && t.length() > 0 && n.isVisibleToUser()) {
+                    // 글자 칸에서 위로 올라가며, 키가 카드 한 장(150dp) 이하인 가장 큰 테두리 = 카드
+                    Rect b = new Rect(); n.getBoundsInScreen(b);
+                    android.view.accessibility.AccessibilityNodeInfo p = n.getParent();
+                    for (int i = 0; p != null && i < 8; i++) {
+                        Rect pb = new Rect(); p.getBoundsInScreen(pb);
+                        if (pb.height() > maxH || pb.width() <= 0) break;
+                        b = pb; p = p.getParent();
+                    }
+                    if (b.width() > 120 * dp) cardAt.put(t.toString(), new Seen(new RectF(b), scanAt));
+                }
+                for (int i = 0; i < n.getChildCount(); i++) { android.view.accessibility.AccessibilityNodeInfo ch = n.getChild(i); if (ch != null) q.add(ch); }
+            }
+        }
+        // 10초 넘게 안 보인 카드는 잊는다
+        for (Iterator<Seen> it = cardAt.values().iterator(); it.hasNext(); ) if (scanAt - it.next().at > 10000) it.remove();
+    }
+    /** 지워진 알림의 카드 테두리(모르면 null). 제목·내용 글자로 찾는다. */
+    RectF cardOf(Gone g) {
+        if (g == null) return null;
+        Seen s = g.title.isEmpty() ? null : cardAt.get(g.title);
+        if (s == null && !g.text.isEmpty()) s = cardAt.get(g.text);
+        return s == null ? null : new RectF(s.r);
+    }
     @Override public void onInterrupt() {}
     @Override public void onDestroy() {
         if (current == this) current = null;
@@ -116,8 +171,9 @@ public final class NaiaService extends AccessibilityService {
     void savePos() { prefs.edit().putFloat("x", x / W()).putFloat("y", y / H()).apply(); }
 
     // ---- 모션 재생 ----
+    int loopFrom, loopEnd;   // 반복 구간(loopEnd=0이면 전체)
     void play(String m, boolean lp, int ms, Runnable end) {
-        motion = m; loop = lp; frameMs = ms; onEnd = end; frame = 0; frameAt = SystemClock.uptimeMillis();
+        motion = m; loop = lp; frameMs = ms; onEnd = end; frame = 0; frameAt = SystemClock.uptimeMillis(); loopFrom = 0; loopEnd = 0;
         stage.kick();
     }
     boolean dnd;
@@ -135,6 +191,7 @@ public final class NaiaService extends AccessibilityService {
         walkTo = Math.max(lo, Math.min(hi, t));
         mirror = walkTo > x;   // 걷기 그림은 왼쪽을 봄 → 오른쪽으로 갈 때만 뒤집는다
         mode = WALK; play("walk", true, 140, null);
+        modeUntil = SystemClock.uptimeMillis() + 2000;   // 2초만 걷고 멈춘다(2초 대기 → 다시 2초 걷기)
     }
 
     // ---- 등장·퇴장 ----
@@ -193,10 +250,12 @@ public final class NaiaService extends AccessibilityService {
         return Math.max(h * 0.15f, Math.min(h * 0.8f, h * (0.225f + 0.105f * pos)));
     }
 
-    void shoot(int pos) {
+    void shoot(int pos, Gone g) {
         if (busy()) return;
-        float ty = notifY(pos);
-        float tx = cx() > W() / 2f ? W() * 0.40f : W() * 0.60f;
+        RectF r = cardOf(g);
+        float ty, tx;
+        if (r != null) { tx = r.centerX(); ty = r.centerY(); }
+        else { ty = notifY(pos); tx = cx() > W() / 2f ? W() * 0.40f : W() * 0.60f; }
         mirror = tx > cx();
         mode = ACTION;
         shotTarget = new PointF(tx, ty);
@@ -204,22 +263,49 @@ public final class NaiaService extends AccessibilityService {
         play("shoot", false, 80, this::toIdle);
         frame = 4;                       // 겨누기 끝 장면부터 바로 시작
         fireDrops(shotAt);               // 첫 물방울은 즉시
+        // 지워진 카드를 제자리에 다시 그려 두고, 물방울이 닿으면 젖어서 찢어진다
+        if (r != null) { Card c = card(g, r, 0); float mx = x + (mirror ? 1 - sp.mouthX : sp.mouthX) * px, my = y + sp.mouthY * px;
+            c.hitAt = shotAt + Math.max(90, (long) (Math.hypot(tx - mx, ty - my) / (H() * 3.2f) * 1000)); cards.add(c); }
     }
     long shotAt;
     PointF shotTarget;
     /** 물총 그림에서 물을 쏘는 프레임(겨누기 이후 발사 구간). */
     boolean firingFrame(String m, int f) { return "shoot".equals(m) && f >= 5 && f <= 10; }
 
-    void callTide() {
+    void callTide(Gone g) {
         // 방금 하나 지우기로 쏘기 시작했는데 연달아 지워졌다면(=모두 지우기) 물총을 접고 파도로
-        if (mode == ACTION && "shoot".equals(motion) && SystemClock.uptimeMillis() - shotAt < 600) { drops.clear(); mode = IDLE; }
+        if (mode == ACTION && "shoot".equals(motion) && SystemClock.uptimeMillis() - shotAt < 600) {
+            drops.clear(); mode = IDLE;
+            for (Card c : cards) if (c.kind == 0 && c.hitAt > SystemClock.uptimeMillis()) { c.kind = 1; c.hitAt = Long.MAX_VALUE; }
+        }
+        RectF r = cardOf(g);
+        if (r != null && !busy()) cards.add(card(g, r, 1));
         if (busy() || (mode == ACTION && "tide".equals(motion))) return;
         mode = ACTION;
         waveDir = cx() > W() / 2f ? -1 : 1;
         mirror = waveDir < 0;    // 파도 부르기 그림은 오른쪽으로 내밂 → 왼쪽으로 보낼 땐 뒤집는다
         play("tide", false, 110, this::toIdle);
+        frame = 5;               // 알림은 이미 사라지는 중이라 기다리지 않고 바로 파도를 부른다
+        wave = new Wave(SystemClock.uptimeMillis(), waveDir, cx() + waveDir * px * 0.25f, y + sp.foot * px);
     }
     int waveDir = 1;
+
+    // ---- 지워진 알림 카드(다시 그려 맞고 사라지는 연출) ----
+    final class Card {
+        final RectF r; final Drawable icon; final String label, title, text; int kind; // 0 = 물총(젖어 찢어짐), 1 = 파도(휩쓸림)
+        final long t0; long hitAt = Long.MAX_VALUE; float hitFront;
+        Card(RectF a, Drawable i, String l, String t, String x, int k, long now) { r = a; icon = i; label = l; title = t; text = x; kind = k; t0 = now; }
+    }
+    final List<Card> cards = new ArrayList<>();
+    Card card(Gone g, RectF r, int kind) {
+        Drawable icon = null; String label = g.pkg;
+        PackageManager pm = getPackageManager();
+        try { label = pm.getApplicationLabel(pm.getApplicationInfo(g.pkg, 0)).toString(); icon = pm.getApplicationIcon(g.pkg); } catch (Exception ignored) {}
+        if (icon == null && g.small != null) try { icon = g.small.loadDrawable(this); } catch (Exception ignored) {}
+        stage.kick();
+        return new Card(r, icon, label, g.title, g.text, kind, SystemClock.uptimeMillis());
+    }
+    float waveFront = Float.NaN;   // 지금 파도 앞머리의 화면 x(없으면 NaN)
 
     // ---- 효과 ----
     final class Drop { float x0, y0, x1, y1, sc; long t0, dur; Drop(float a, float b, float c, float d, float s, long t, long u) { x0 = a; y0 = b; x1 = c; y1 = d; sc = s; t0 = t; dur = u; } }
@@ -227,7 +313,7 @@ public final class NaiaService extends AccessibilityService {
     final class Wave { long t0; int dir; float x0, ground; Wave(long t, int d, float a, float g) { t0 = t; dir = d; x0 = a; ground = g; } }
     final class Bubble { Drawable icon; String label, title, text; long t0; Bubble(Drawable i, String l, String a, String b, long t) { icon = i; label = l; title = a; text = b; t0 = t; } }
     final List<Drop> drops = new ArrayList<>(); final List<Splat> splats = new ArrayList<>(); Wave wave; Bubble bubble;
-    void clearFx() { drops.clear(); splats.clear(); wave = null; bubble = null; }
+    void clearFx() { drops.clear(); splats.clear(); wave = null; bubble = null; cards.clear(); waveFront = Float.NaN; }
 
     void fireDrops(long now) {
         if (shotTarget == null) return;
@@ -248,12 +334,12 @@ public final class NaiaService extends AccessibilityService {
             while (now - frameAt >= frameMs) {
                 frameAt += frameMs; frame++;
                 int n = sp.count(motion);
-                if (frame >= n) {
-                    if (loop) frame = 0;
+                int end = loop && loopEnd > 0 ? Math.min(n, loopEnd) : n;
+                if (frame >= end) {
+                    if (loop) frame = loopFrom;
                     else { frame = n - 1; Runnable r = onEnd; onEnd = null; frameAt = now; if (r != null) r.run(); break; }
                 }
                 if (firingFrame(motion, frame)) fireDrops(now);
-                if ("tide".equals(motion) && frame == 6) wave = new Wave(now, waveDir, cx() + waveDir * px * 0.25f, y + sp.foot * px);
             }
         }
         long dt = lastStepAt == 0 ? 16 : Math.min(50, now - lastStepAt); lastStepAt = now;
@@ -261,7 +347,7 @@ public final class NaiaService extends AccessibilityService {
         if (mode == WALK) {
             float speed = 0.7057f * px / 1000f * dt; // 걷기 그림 보폭에 맞춘 속도(초당 0.7배 몸 크기)
             float d = walkTo - x;
-            if (Math.abs(d) <= speed) { x = walkTo; savePos(); toIdle(); }
+            if (Math.abs(d) <= speed || now > modeUntil) { if (Math.abs(d) <= speed) x = walkTo; savePos(); toIdle(); }
             else x += Math.signum(d) * speed;
         }
         // 물방울 → 도착하면 철퍽
@@ -274,7 +360,7 @@ public final class NaiaService extends AccessibilityService {
         updateGrip();
     }
 
-    boolean animating() { return mode != HIDDEN || puddleOn || !drops.isEmpty() || !splats.isEmpty() || wave != null || bubble != null; }
+    boolean animating() { return mode != HIDDEN || puddleOn || !drops.isEmpty() || !splats.isEmpty() || wave != null || bubble != null || !cards.isEmpty(); }
 
     // ---- 그리기 ----
     final class Stage extends View {
@@ -307,6 +393,7 @@ public final class NaiaService extends AccessibilityService {
             if (sp == null) return;
             step(now);
             float k = px / (float) sp.size;          // 자산 px → 화면 px
+            drawCards(c, now);
             drawWave(c, now, k);
             float ps = puddleScale(now);
             if (ps > 0 && !("enter".equals(motion) || "exit".equals(motion)) || (ps > 0 && "enter".equals(motion) && now < frameAt)) {
@@ -347,21 +434,85 @@ public final class NaiaService extends AccessibilityService {
             Bitmap ref = sp.fx.get("wave_k2");
             float scale = (px * 0.9f * 1.6f) / ref.getHeight();     // 나이아보다 크게
             float w2 = ref.getWidth() * scale;
-            float far = wave.dir > 0 ? W() + w2 * 0.1f : -w2 * 1.1f;
-            float travel = Math.abs(far - wave.x0);
-            long rise = 330, run = (long) (travel / (W() * 0.9f) * 1000), crash = 500;
-            String key; float xx; float sink = 0;
-            if (t < rise) { key = "wave_k1"; xx = wave.x0; }
-            else if (t < rise + run) { key = ((t / 110) % 2 == 0) ? "wave_k2" : "wave_k2b"; float u = (t - rise) / (float) run; u = u * u * (3 - 2 * u); xx = wave.x0 + (far - wave.x0) * u; }
-            else if (t < rise + run + crash) { key = "wave_k3"; xx = far; sink = (t - rise - run) / (float) crash; }
-            else { wave = null; return; }
+            // 파도 왼쪽 끝 위치: 시작 → 화면 끝에 닿는 곳까지 달린 뒤 그 자리에서 부서진다(화면 밖으로 나갔다 다시 나오지 않게)
+            float start = wave.dir > 0 ? wave.x0 : wave.x0 - w2 * 0.4f;
+            float stop = wave.dir > 0 ? W() - w2 : 0;
+            if ((stop - start) * wave.dir < W() * 0.2f) stop = start + wave.dir * W() * 0.2f;
+            float travel = Math.abs(stop - start);
+            long rise = 260, run = Math.max(350, (long) (travel / (W() * 0.9f) * 1000)), crash = 500;
+            String key; float left; float sink = 0;
+            if (t < rise) { key = "wave_k1"; left = start; }
+            else if (t < rise + run) { key = ((t / 110) % 2 == 0) ? "wave_k2" : "wave_k2b"; float u = (t - rise) / (float) run; u = u * u * (3 - 2 * u); left = start + (stop - start) * u; }
+            else if (t < rise + run + crash) { key = "wave_k3"; left = stop; sink = (t - rise - run) / (float) crash; }
+            else { wave = null; waveFront = Float.NaN; return; }
             Bitmap b = sp.fx.get(key);
             float w = b.getWidth() * scale, h = b.getHeight() * scale;
-            float left = wave.dir > 0 ? xx - (key.equals("wave_k3") ? w * 0.6f : 0) : xx - w * 0.4f;
-            if (key.equals("wave_k3")) left = wave.dir > 0 ? W() - w : 0;
+            if (key.equals("wave_k3") && wave.dir > 0) left = stop + w2 - w;   // 부서질 때 앞머리 자리 유지
+            waveFront = wave.dir > 0 ? left + w : left;
             float top = wave.ground - h + sink * h * 0.8f;
             c.save(); c.clipRect(0, 0, W(), wave.ground + 4 * dp);
             sprite(c, b, left, top, w, h, wave.dir < 0);   // 파도 그림은 오른쪽으로 말림 → 왼쪽으로 갈 땐 뒤집음
+            c.restore();
+        }
+
+        /** 지워진 알림 카드: 물총은 젖었다가 지그재그로 찢어져 떨어지고, 파도는 흔들리다 휩쓸려 밀려난다. */
+        void drawCards(Canvas c, long now) {
+            for (Iterator<Card> it = cards.iterator(); it.hasNext(); ) {
+                Card cd = it.next();
+                if (now - cd.t0 > 4000) { it.remove(); continue; }
+                if (cd.kind == 0) {
+                    long a = now - cd.hitAt;
+                    if (a < 0) { drawCard(c, cd, 0, 0, 0, 255, 0); continue; }
+                    if (a < 220) { drawCard(c, cd, 0, 0, 0, 255, a / 220f); continue; }       // 젖는 중
+                    float u = (a - 220) / 700f; if (u >= 1) { it.remove(); continue; }
+                    int al = (int) (255 * (1 - u * u));
+                    float fall = u * u * cd.r.height() * 3f, spread = u * cd.r.width() * 0.12f;
+                    // 지그재그 찢긴 선(카드 가운데 세로)
+                    Path left = new Path(), right = new Path(); float mid = cd.r.centerX(), zz = 7 * dp; int steps = 8;
+                    left.moveTo(cd.r.left - 4, cd.r.top - 4); right.moveTo(cd.r.right + 4, cd.r.top - 4);
+                    for (int i = 0; i <= steps; i++) { float yy = cd.r.top + cd.r.height() * i / steps, xx = mid + (i % 2 == 0 ? -zz : zz); left.lineTo(xx, yy); }
+                    for (int i = 0; i <= steps; i++) { float yy = cd.r.top + cd.r.height() * i / steps, xx = mid + (i % 2 == 0 ? -zz : zz); right.lineTo(xx, yy); }
+                    left.lineTo(cd.r.left - 4, cd.r.bottom + 4); left.close(); right.lineTo(cd.r.right + 4, cd.r.bottom + 4); right.close();
+                    c.save(); c.translate(-spread, fall); c.rotate(-12 * u, cd.r.left, cd.r.bottom); c.clipPath(left); drawCard(c, cd, 0, 0, 0, al, 1); c.restore();
+                    c.save(); c.translate(spread, fall * 1.15f); c.rotate(14 * u, cd.r.right, cd.r.bottom); c.clipPath(right); drawCard(c, cd, 0, 0, 0, al, 1); c.restore();
+                } else {
+                    float front = waveFront; int dir = wave != null ? wave.dir : 1;
+                    if (cd.hitAt == Long.MAX_VALUE && !Float.isNaN(front) && (front - cd.r.centerX()) * dir >= 0) { cd.hitAt = now; cd.hitFront = front; }
+                    if (cd.hitAt == Long.MAX_VALUE) {
+                        if (wave == null && now - cd.t0 > 1500) { it.remove(); continue; }
+                        // 파도가 다가올수록 흔들림이 커진다
+                        float near = Float.isNaN(front) ? 0.2f : Math.max(0.2f, 1 - Math.abs(cd.r.centerX() - front) / W());
+                        float rot = (float) Math.sin(now / 70.0) * 3f * near;
+                        drawCard(c, cd, 0, (float) Math.sin(now / 90.0) * 2 * dp * near, rot, 255, 0.15f * near);
+                        continue;
+                    }
+                    float u = (now - cd.hitAt) / 900f; if (u >= 1) { it.remove(); continue; }
+                    float dx = Float.isNaN(front) ? dir * u * W() : front - cd.hitFront;     // 파도 앞머리와 함께 밀려남
+                    float bob = (float) Math.sin(u * 12) * 8 * dp - u * 20 * dp;
+                    float rot = dir * (8 + 10 * (float) Math.sin(u * 9)) * Math.min(1, u * 3);
+                    drawCard(c, cd, dx, bob, rot, (int) (255 * (1 - u)), 0.6f);
+                }
+            }
+        }
+        final Paint cardFill = new Paint(Paint.ANTI_ALIAS_FLAG), wet = new Paint(Paint.ANTI_ALIAS_FLAG);
+        void drawCard(Canvas c, Card cd, float dx, float dy, float rot, int alpha, float wetness) {
+            RectF r = new RectF(cd.r); r.offset(dx, dy); float rad = Math.min(r.height() / 2, 22 * dp);
+            c.save(); c.rotate(rot, r.centerX(), r.centerY());
+            cardFill.setColor(0xFFFFFFFF); cardFill.setAlpha(alpha); c.drawRoundRect(r, rad, rad, cardFill);
+            float pad = 14 * dp, ic = Math.min(30 * dp, r.height() - 2 * pad), tx = r.left + pad;
+            if (cd.icon != null && ic > 0) { cd.icon.setBounds((int) tx, (int) (r.centerY() - ic / 2), (int) (tx + ic), (int) (r.centerY() + ic / 2)); cd.icon.setAlpha(alpha); cd.icon.draw(c); tx += ic + 10 * dp; }
+            float tw = r.right - pad - tx;
+            tBold.setAlpha(alpha); tLight.setAlpha(alpha);
+            String head = cd.title.isEmpty() ? cd.label : cd.title;
+            c.drawText(fit(head, tBold, tw), tx, r.centerY() - 2 * dp, tBold);
+            c.drawText(fit(cd.text, tLight, tw), tx, r.centerY() + tLight.getTextSize(), tLight);
+            tBold.setAlpha(255); tLight.setAlpha(255);
+            if (wetness > 0) {   // 젖음: 푸른 물빛 + 물방울 자국
+                wet.setColor(0xFF4FA8E0); wet.setAlpha((int) (alpha * 0.35f * wetness)); c.drawRoundRect(r, rad, rad, wet);
+                wet.setColor(0xFF2E86C8); wet.setAlpha((int) (alpha * 0.55f * wetness));
+                Random dr = new Random(cd.t0);
+                for (int i = 0; i < 9; i++) { float ddx = r.left + dr.nextFloat() * r.width(), ddy = r.top + dr.nextFloat() * r.height(); c.drawCircle(ddx, ddy, (2 + dr.nextFloat() * 4) * dp, wet); }
+            }
             c.restore();
         }
 
@@ -451,6 +602,8 @@ public final class NaiaService extends AccessibilityService {
         mode = DRAG; mirror = false;
         play("pull", true, 110, null);
         frame = 1;   // 첫 장(대기)은 건너뛰고 바로 허우적
+        // 누르고 있는 동안은 허우적 구간(1~12번)만 반복: 앞뒤의 대기 장면으로 돌아가지 않는다
+        loopFrom = 1; loopEnd = 13;
     }
     void tickle() {
         if (busy()) return;
