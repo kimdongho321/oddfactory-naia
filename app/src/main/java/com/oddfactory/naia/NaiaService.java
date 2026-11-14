@@ -145,7 +145,7 @@ public final class NaiaService extends AccessibilityService {
         if (mode != HIDDEN) return;
         mode = ENTER; mirror = false;
         puddle(0, 1, 300);
-        motion = "enter"; frame = 0; frameAt = SystemClock.uptimeMillis() + 300; loop = false; frameMs = 110;
+        motion = "enter"; frame = 0; frameAt = SystemClock.uptimeMillis() + 300; loop = false; frameMs = 73;   // 등장 1.5배 빠르게(110→73)
         onEnd = () -> { puddle(1, 0, 450); toIdle(); };
         showGrip(true); stage.kick();
     }
@@ -156,7 +156,7 @@ public final class NaiaService extends AccessibilityService {
         mode = EXIT; mirror = false;
         motion = "idle"; frame = 0; loop = true;
         puddle(0, 1, 300);
-        main.postDelayed(() -> play("exit", false, 110, () -> {
+        main.postDelayed(() -> play("exit", false, 73, () -> {
             puddle(1, 0, 450);
             motion = null;
             main.postDelayed(() -> { mode = HIDDEN; puddleOn = false; stage.invalidate(); }, 460);
