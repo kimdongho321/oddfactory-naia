@@ -286,7 +286,7 @@ public final class NaiaService extends AccessibilityService {
         }
         if (busy() || (mode == ACTION && "tide".equals(motion))) return;
         mode = ACTION;
-        waveDir = cx() > W() / 2f ? -1 : 1;
+        waveDir = mirror ? 1 : -1;   // 지금 바라보는 쪽으로 보낸다(mirror = 오른쪽을 봄)
         mirror = waveDir < 0;    // 파도 부르기 그림은 오른쪽으로 내밂 → 왼쪽으로 보낼 땐 뒤집는다
         play("tide", false, 110, this::toIdle);
         frame = 5;               // 알림은 이미 사라지는 중이라 기다리지 않고 바로 파도를 부른다
@@ -438,19 +438,21 @@ public final class NaiaService extends AccessibilityService {
             Bitmap ref = sp.fx.get("wave_k2");
             float scale = (px * 0.9f * 1.6f) / ref.getHeight();     // 나이아보다 크게
             float w2 = ref.getWidth() * scale;
-            // 파도 왼쪽 끝 위치: 시작 → 반대편 화면 밖으로 완전히 빠질 때까지 쭉 달린다(부서지는 장면 없음)
-            float start = wave.dir > 0 ? wave.x0 : wave.x0 - w2 * 0.4f;
-            float stop = wave.dir > 0 ? W() + 4 * dp : -w2 - 4 * dp;
+            // 파도 왼쪽 끝 위치: 나이아 등 뒤쪽 화면 끝에서 솟아 → 바라보는 쪽 화면 끝까지 달린 뒤 그 자리에서 부서진다
+            float start = wave.dir > 0 ? -w2 * 0.4f : W() - w2 * 0.6f;
+            float stop = wave.dir > 0 ? W() - w2 : 0;
             float travel = Math.abs(stop - start);
-            long rise = 260, run = Math.max(450, (long) (travel / (W() * 0.9f) * 1000));
-            String key; float left;
+            long rise = 260, run = Math.max(350, (long) (travel / (W() * 0.9f) * 1000)), crash = 500;
+            String key; float left; float sink = 0;
             if (t < rise) { key = "wave_k1"; left = start; }
-            else if (t < rise + run) { key = ((t / 110) % 2 == 0) ? "wave_k2" : "wave_k2b"; float u = (t - rise) / (float) run; u = u * u * (1.6f - 0.6f * u); left = start + (stop - start) * u; }
+            else if (t < rise + run) { key = ((t / 110) % 2 == 0) ? "wave_k2" : "wave_k2b"; float u = (t - rise) / (float) run; u = u * u * (3 - 2 * u); left = start + (stop - start) * u; }
+            else if (t < rise + run + crash) { key = "wave_k3"; left = stop; sink = (t - rise - run) / (float) crash; }
             else { wave = null; waveFront = Float.NaN; return; }
             Bitmap b = sp.fx.get(key);
             float w = b.getWidth() * scale, h = b.getHeight() * scale;
+            if (key.equals("wave_k3") && wave.dir > 0) left = stop + w2 - w;   // 부서질 때 앞머리 자리 유지
             waveFront = wave.dir > 0 ? left + w : left;
-            float top = wave.ground - h;
+            float top = wave.ground - h + sink * h * 0.8f;
             c.save(); c.clipRect(0, 0, W(), wave.ground + 4 * dp);
             sprite(c, b, left, top, w, h, wave.dir < 0);   // 파도 그림은 오른쪽으로 말림 → 왼쪽으로 갈 땐 뒤집음
             c.restore();
