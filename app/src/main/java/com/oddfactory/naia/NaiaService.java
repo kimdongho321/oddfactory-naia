@@ -227,6 +227,7 @@ public final class NaiaService extends AccessibilityService {
         hideMenu();
         prefs.edit().putBoolean("shown", true).apply();
         if (mode != HIDDEN) return;
+        placeDefault();   // 지금 화면 크기 기준으로 다시 놓는다(접힘·회전 뒤 화면 밖에 남아 있지 않게)
         mode = ENTER; mirror = false;
         puddle(0, 1, 300);
         motion = "enter"; frame = 0; frameAt = SystemClock.uptimeMillis() + 300; loop = false; frameMs = 73;   // 등장 1.5배 빠르게(110→73)
@@ -403,6 +404,14 @@ public final class NaiaService extends AccessibilityService {
         final Paint pix = new Paint(); final Paint card = new Paint(Paint.ANTI_ALIAS_FLAG), border = new Paint(Paint.ANTI_ALIAS_FLAG);
         final Paint tBold = new Paint(Paint.ANTI_ALIAS_FLAG), tLight = new Paint(Paint.ANTI_ALIAS_FLAG);
         final Rect src = new Rect(); final RectF dst = new RectF();
+        /** 폴드 접기·펴기, 회전으로 화면 크기가 바뀌면 같은 비율 위치로 옮기고 화면 안으로 넣는다 */
+        @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
+            super.onSizeChanged(w, h, ow, oh);
+            if (ow > 0 && oh > 0) { x = x * w / ow; y = y * h / oh; } else placeDefault();
+            clamp();
+            if (mode == WALK) walkTo = Math.max(0, Math.min(w - px, walkTo));
+            gripLastX = -1; updateGrip(); kick();
+        }
         Stage(Context c) {
             super(c);
             pix.setFilterBitmap(false);
