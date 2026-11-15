@@ -663,6 +663,8 @@ public final class NaiaService extends AccessibilityService {
     void startDrag() {
         if (mode == DRAG || mode == HIDDEN || mode == ENTER || mode == EXIT) return;
         main.removeCallbacks(longPress); if (pendingTap != null) { main.removeCallbacks(pendingTap); pendingTap = null; }
+        // 방해 금지 중에는 깨우지 않고 자는 모습 그대로 자리만 옮긴다
+        if (dnd) { mode = DRAG; if (!"sleep".equals(motion)) play("sleep", true, 130, null); return; }
         mode = DRAG; mirror = false;
         play("pull", true, 110, null);
         frame = 1;   // 첫 장(대기)은 건너뛰고 바로 허우적
