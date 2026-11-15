@@ -46,6 +46,8 @@ public final class NaiaService extends AccessibilityService {
     static volatile boolean pendingDnd;
     static void summon() { NaiaService s = current; if (s != null) s.main.post(s::enter); }
     static void dismiss() { NaiaService s = current; if (s != null) s.main.post(s::exit); }
+    /** 앱의 크기 막대: 발밑(아래 가운데)을 그대로 두고 바로 크기를 바꾼다 */
+    static void resize(int sizeDp) { NaiaService s = current; if (s != null) s.main.post(() -> s.applySize(sizeDp)); }
     static boolean shown() { NaiaService s = current; return s != null && s.mode != HIDDEN; }
 
     static final int HIDDEN = 0, ENTER = 1, IDLE = 2, WALK = 3, ACTION = 4, DRAG = 5, EXIT = 6;
@@ -95,7 +97,7 @@ public final class NaiaService extends AccessibilityService {
         grip.setVisibility(View.GONE);
         wm.addView(grip, gripLp);
         // 화면 크기를 안 뒤 첫 등장(설정에서 켰거나 재부팅 후 켜졌을 때)
-        stage.post(() -> { placeDefault(); if (prefs.getBoolean("shown", true)) enter(); });
+        stage.post(() -> { placeDefault(); if (prefs.getBoolean("shown", false)) enter(); });
     }
 
     // ---- 알림창 카드 위치 기억 ----
@@ -166,6 +168,13 @@ public final class NaiaService extends AccessibilityService {
         if (sx >= 0 && sy >= 0) { x = sx * W(); y = sy * H(); }
         else { x = W() - px - 8 * dp; y = H() - px - 110 * dp; }
         clamp();
+    }
+    void applySize(int sizeDp) {
+        int n = Math.round(sizeDp * dp); if (n == px || n <= 0) return;
+        float bx = x + px * 0.5f, by = y + px;
+        px = n; x = bx - px * 0.5f; y = by - px; clamp();
+        if (mode == WALK) walkTo = Math.max(0, Math.min(W() - px, walkTo));
+        gripLastX = -1; updateGrip(); stage.kick(); savePos();
     }
     void clamp() { x = Math.max(-px * 0.15f, Math.min(W() - px * 0.85f, x)); y = Math.max(0, Math.min(H() - px, y)); }
     void savePos() { prefs.edit().putFloat("x", x / W()).putFloat("y", y / H()).apply(); }
@@ -618,7 +627,7 @@ public final class NaiaService extends AccessibilityService {
         GradientDrawable bg = new GradientDrawable(); bg.setColor(0xFFFFFFFF); bg.setCornerRadius(16 * dp); bg.setStroke(Math.round(3 * dp), 0xFF5A3A2E);
         box.setBackground(bg);
         Typeface tf = null; try { tf = getResources().getFont(R.font.maple_bold); } catch (Exception ignored) {}
-        String[] labels = {"설정 열기", "나이아 돌려보내기", "닫기"};
+        String[] labels = {"설정 열기", "나이아 종료", "닫기"};
         Runnable[] acts = {
                 () -> { hideMenu(); Intent i = new Intent(this, MainActivity.class); i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(i); },
                 this::exit, this::hideMenu};
