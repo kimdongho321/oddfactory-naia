@@ -114,6 +114,8 @@ public final class NaiaService extends AccessibilityService {
     long scanAt; boolean scanQueued;
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
         if (e == null || e.getPackageName() == null || !"com.android.systemui".contentEquals(e.getPackageName())) return;
+        // 알림창의 '모두 지우기' 버튼을 누르는 순간 파도(알림이 사라지길 기다리지 않는다)
+        if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED && isClearAll(e)) { tideByTap = SystemClock.uptimeMillis(); callTide(null); return; }
         if (scanQueued) return;
         scanQueued = true;
         long wait = Math.max(0, 120 - (SystemClock.uptimeMillis() - scanAt));
@@ -267,7 +269,7 @@ public final class NaiaService extends AccessibilityService {
     }
 
     void shoot(int pos, Gone g) {
-        if (busy()) return;
+        if (busy() || SystemClock.uptimeMillis() - tideByTap < 3000) return;   // 모두 지우기로 파도가 이미 나갔으면 물총 생략
         RectF r = cardOf(g);
         float ty, tx;
         if (r != null) { tx = r.centerX(); ty = r.centerY(); }
@@ -286,7 +288,21 @@ public final class NaiaService extends AccessibilityService {
     /** 물총 그림에서 물을 쏘는 프레임(겨누기 이후 발사 구간). */
     boolean firingFrame(String m, int f) { return "shoot".equals(m) && f >= 5 && f <= 10; }
 
+    long tideByTap;
+    /** 누른 버튼이 '모두 지우기'인지: 버튼 글자·설명·화면 id만 본다 */
+    static boolean isClearAll(AccessibilityEvent e) {
+        StringBuilder b = new StringBuilder();
+        for (CharSequence t : e.getText()) if (t != null) b.append(t).append(' ');
+        if (e.getContentDescription() != null) b.append(e.getContentDescription()).append(' ');
+        android.view.accessibility.AccessibilityNodeInfo n = e.getSource();
+        if (n != null) { String id = n.getViewIdResourceName(); if (id != null) b.append(id); }
+        String k = b.toString().toLowerCase(java.util.Locale.ROOT).replace(" ", "");
+        return k.contains("모두지우기") || k.contains("전체삭제") || k.contains("모두삭제") || k.contains("clearall")
+                || k.contains("clear_all") || k.contains("dismiss_text") || k.contains("dismissall") || k.contains("dismiss_all");
+    }
     void callTide(Gone g) {
+        // 버튼을 누를 때 이미 파도를 보냈으면, 뒤이어 오는 '알림이 지워졌다' 소식으로 또 보내지 않는다
+        if (g != null && SystemClock.uptimeMillis() - tideByTap < 3000) return;
         // 방금 하나 지우기로 쏘기 시작했는데 연달아 지워졌다면(=모두 지우기) 물총을 접고 파도로
         if (mode == ACTION && "shoot".equals(motion) && SystemClock.uptimeMillis() - shotAt < 600) {
             drops.clear(); mode = IDLE;
