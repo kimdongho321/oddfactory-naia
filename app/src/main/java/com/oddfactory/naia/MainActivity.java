@@ -49,7 +49,7 @@ public final class MainActivity extends Activity {
         // 크기
         // 크기: 다른 앱들처럼 막대로, 끄는 동안 바로 반영
         final int MIN = 100, MAX = 280;
-        int cur = Math.max(MIN, Math.min(MAX, prefs.getInt("size", 170)));
+        int cur = Math.max(MIN, Math.min(MAX, NaiaService.sizeDp(prefs)));
         TextView sz = text("나이아 크기: " + cur, 15, true); sz.setPadding(0, (int) (14 * dp), 0, 0); l.addView(sz);
         SeekBar seek = new SeekBar(this); seek.setMax(MAX - MIN); seek.setProgress(cur - MIN);
         seek.setPadding((int) (8 * dp), (int) (10 * dp), (int) (8 * dp), (int) (10 * dp));
