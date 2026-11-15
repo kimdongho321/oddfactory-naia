@@ -64,6 +64,7 @@ public final class NaiaService extends AccessibilityService {
     float x, y;            // 프레임 왼쪽 위(화면 px)
     int px;                // 프레임을 그릴 한 변(px)
     boolean mirror;        // true = 오른쪽을 보게 좌우 반전(원본 그림은 왼쪽을 봄)
+    boolean facingRight;   // 마지막으로 걷던 방향(대기 때 계속 그쪽을 본다)
     String motion = "idle"; int frame; long frameAt; int frameMs = 110; boolean loop = true; Runnable onEnd;
     long modeUntil, lastStepAt; float walkTo;
     // 웅덩이(등장·퇴장 때 발밑): scale 0~1
@@ -188,7 +189,7 @@ public final class NaiaService extends AccessibilityService {
     boolean dnd;
     void setDnd(boolean on) { dnd = on; if (mode == IDLE || mode == WALK) toIdle(); }
     void toIdle() {
-        mode = IDLE; mirror = false;
+        mode = IDLE; mirror = facingRight;
         if (dnd) { play("sleep", true, 130, null); modeUntil = Long.MAX_VALUE; return; }   // 방해 금지: 제자리에서 꾸벅꾸벅
         play("idle", true, 110, null);
         modeUntil = SystemClock.uptimeMillis() + 2000;
@@ -199,6 +200,7 @@ public final class NaiaService extends AccessibilityService {
         if (Math.abs(t - x) < W() * 0.15f) t = (x > (lo + hi) / 2) ? x - W() * 0.25f : x + W() * 0.25f;
         walkTo = Math.max(lo, Math.min(hi, t));
         mirror = walkTo > x;   // 걷기 그림은 왼쪽을 봄 → 오른쪽으로 갈 때만 뒤집는다
+        facingRight = mirror;
         mode = WALK; play("walk", true, 140, null);
         modeUntil = SystemClock.uptimeMillis() + 2000;   // 2초만 걷고 멈춘다(2초 대기 → 다시 2초 걷기)
     }
@@ -286,7 +288,7 @@ public final class NaiaService extends AccessibilityService {
         }
         if (busy() || (mode == ACTION && "tide".equals(motion))) return;
         mode = ACTION;
-        waveDir = mirror ? 1 : -1;   // 지금 바라보는 쪽으로 보낸다(mirror = 오른쪽을 봄)
+        waveDir = facingRight ? 1 : -1;   // 바라보는 쪽(마지막 걷던 방향)으로 보낸다
         mirror = waveDir < 0;    // 파도 부르기 그림은 오른쪽으로 내밂 → 왼쪽으로 보낼 땐 뒤집는다
         play("tide", false, 110, this::toIdle);
         frame = 5;               // 알림은 이미 사라지는 중이라 기다리지 않고 바로 파도를 부른다
@@ -442,15 +444,18 @@ public final class NaiaService extends AccessibilityService {
             float start = wave.dir > 0 ? -w2 * 0.4f : W() - w2 * 0.6f;
             float stop = wave.dir > 0 ? W() - w2 : 0;
             float travel = Math.abs(stop - start);
-            long rise = 260, run = Math.max(350, (long) (travel / (W() * 0.9f) * 1000)), crash = 500;
-            String key; float left; float sink = 0;
+            long rise = 260, run = Math.max(350, (long) (travel / (W() * 0.9f) * 1000));
+            // 부서지는 동안에도 달리던 속도 그대로 계속 나아가 화면 밖으로 사라진다
+            float v = travel / run;                                   // px/ms
+            long crash = Math.max(500, (long) (w2 * 1.1f / v));
+            String key; float left; float sink = 0; float moved = 0;
             if (t < rise) { key = "wave_k1"; left = start; }
-            else if (t < rise + run) { key = ((t / 110) % 2 == 0) ? "wave_k2" : "wave_k2b"; float u = (t - rise) / (float) run; u = u * u * (3 - 2 * u); left = start + (stop - start) * u; }
-            else if (t < rise + run + crash) { key = "wave_k3"; left = stop; sink = (t - rise - run) / (float) crash; }
+            else if (t < rise + run) { key = ((t / 110) % 2 == 0) ? "wave_k2" : "wave_k2b"; float u = (t - rise) / (float) run; u = u * u * (2 - u); left = start + (stop - start) * u; }
+            else if (t < rise + run + crash) { key = "wave_k3"; long a = t - rise - run; moved = wave.dir * v * a; left = stop + moved; sink = Math.min(1f, a / 700f) * 0.5f; }
             else { wave = null; waveFront = Float.NaN; return; }
             Bitmap b = sp.fx.get(key);
             float w = b.getWidth() * scale, h = b.getHeight() * scale;
-            if (key.equals("wave_k3") && wave.dir > 0) left = stop + w2 - w;   // 부서질 때 앞머리 자리 유지
+            if (key.equals("wave_k3") && wave.dir > 0) left = stop + w2 - w + moved;   // 부서질 때도 앞머리 기준으로 이어서 이동
             waveFront = wave.dir > 0 ? left + w : left;
             float top = wave.ground - h + sink * h * 0.8f;
             c.save(); c.clipRect(0, 0, W(), wave.ground + 4 * dp);
