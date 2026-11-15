@@ -53,6 +53,15 @@ public final class NaiaService extends AccessibilityService {
         if (!p.getBoolean("size120", false)) p.edit().putInt("size", 120).putBoolean("size120", true).apply();
         return p.getInt("size", 120);
     }
+    /** 금융 앱(네이버페이·은행 등)이 접근성 앱을 '원격제어'로 막을 때: 나이아 접근성을 스스로 끈다. 다시 켜는 건 설정에서. */
+    static boolean pauseForFinance() {
+        NaiaService s = current; if (s == null) return false;
+        s.main.post(() -> {
+            android.widget.Toast.makeText(s, "나이아 접근성을 껐어요. 금융 앱을 다 쓰면 앱의 ②로 다시 켜 주세요", android.widget.Toast.LENGTH_LONG).show();
+            s.disableSelf();
+        });
+        return true;
+    }
     static boolean shown() { NaiaService s = current; return s != null && s.mode != HIDDEN; }
 
     static final int HIDDEN = 0, ENTER = 1, IDLE = 2, WALK = 3, ACTION = 4, DRAG = 5, EXIT = 6;
@@ -684,10 +693,10 @@ public final class NaiaService extends AccessibilityService {
         GradientDrawable bg = new GradientDrawable(); bg.setColor(0xFFFFFFFF); bg.setCornerRadius(16 * dp); bg.setStroke(Math.round(3 * dp), 0xFF5A3A2E);
         box.setBackground(bg);
         Typeface tf = null; try { tf = getResources().getFont(R.font.maple_bold); } catch (Exception ignored) {}
-        String[] labels = {"설정 열기", "나이아 종료", "닫기"};
+        String[] labels = {"설정 열기", "나이아 종료", "금융 앱 쓸 때 잠깐 끄기", "닫기"};
         Runnable[] acts = {
                 () -> { hideMenu(); Intent i = new Intent(this, MainActivity.class); i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(i); },
-                this::exit, this::hideMenu};
+                this::exit, () -> { hideMenu(); pauseForFinance(); }, this::hideMenu};
         for (int i = 0; i < labels.length; i++) {
             Button b = new Button(this); b.setText(labels[i]); b.setAllCaps(false); if (tf != null) b.setTypeface(tf);
             final Runnable r = acts[i]; b.setOnClickListener(v -> r.run());

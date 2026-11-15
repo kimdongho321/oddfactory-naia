@@ -60,6 +60,13 @@ public final class MainActivity extends Activity {
         });
         l.addView(seek);
         l.addView(button("시험 알림 3개 보내기", 0xFF9DB0B8, v -> postTests()));
+        // 금융 앱 호환: 네이버페이·은행 앱이 접근성 앱을 '원격제어 앱'으로 보고 막는 경우
+        TextView fin = text("네이버페이·은행 앱에서 '원격제어 앱' 오류가 나면 아래 버튼으로 나이아 접근성을 잠깐 끄고 쓴 뒤, ②로 다시 켜 주세요.", 13, false);
+        fin.setPadding(0, (int) (14 * dp), 0, 0); l.addView(fin);
+        l.addView(button("금융 앱 쓸 때 잠깐 끄기", 0xFFB0868B, v -> {
+            if (!NaiaService.pauseForFinance()) Toast.makeText(this, "지금은 접근성이 꺼져 있어요", Toast.LENGTH_SHORT).show();
+            getWindow().getDecorView().postDelayed(this::refresh, 600);
+        }));
         TextView help = text("나이아 조작: 톡 = 간지럼 · 꾹 눌러 끌기 = 볼 당겨 옮기기 · 두 번 톡 = 메뉴(설정·종료)", 13, false);
         help.setPadding(0, (int) (12 * dp), 0, 0); l.addView(help);
         l.addView(button("업데이트 확인 (현재 " + BuildConfig.VERSION_NAME + ")", 0xFF7C8CC4, v -> appUpdates.checkNow()));
